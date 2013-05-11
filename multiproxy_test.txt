@@ -1,0 +1,27 @@
+========
+Here's a short systems programming exercise:
+
+Take nweb (a tiny C web server) + libcurl and build a 'multi-proxing webserver search service'.
+
+The web server should:
+
+* Take a request like this   http://localhost/multiproxy.html?dest=A,B,C&query=italian
+* Lookup the endpoint URLs of A, B, and C in a static-table (or config file if you want to get fancy)
+* Farm out parallel requests to A, B, C with the query "italian"
+* Those services should respond with something like this 
+     * <LI> Italian Village 5370 South 900 East  Salt Lake City, UT 84117  (801) 266-4182  - 3 stars - $10 per plate
+     * Each service should respond with a different bit of text
+     * Each service could be made from nweb itself looking up static files and serving them back
+* Once the parallel requests and their responses are all handled format a final client response like this:
+     * <HTML><BODY><UL>
+     * <H3>Query: italian<H3>
+     * [Concatenated list of responses from A, B & C.
+     * </UL></BODY></HTML>
+* Extra credit if you use JSON instead of text HTML and make the individual responses have fields in a JSON structure.
+
+http://www.ibm.com/developerworks/systems/library/es-nweb/index.html
+http://curl.haxx.se/libcurl/
+HINT:  This page has an example of a multi-threaded parallel requests to different URLs:  http://curl.haxx.se/libcurl/c/multithread.html
+
+I'd estimate this is a 6 hour or less project.  Deliverable would be a build-able set of code with GCC and a README with instructions to start the services up with needed data files. 
+

@@ -1,0 +1,22 @@
+Multiproxy:
+  A simple multithreaded proxy request server.
+
+Build:
+  There is a simple Makefile located int the root of the project. To build the 
+  code simply run: make
+
+Run:
+  To start multiproxy, there are two command line parameters. The port you wish 
+  to run on, and the directory where your static files live:
+  
+  * ./multiproxy 8080 /home/user/src/multiproxy/html
+
+  There are three proxy endpoints statically defined:
+
+  * A -> http://localhost:8080/test1.html
+  * B -> http://localhost:8080/test2.html
+  * 3 -> http://localhost:8080/test3.html
+
+  Since these run on port 8080, its recommended to run multiproxy on the same
+  port. The test files listed above are located in the html directory of the
+  multiproxy folder.
