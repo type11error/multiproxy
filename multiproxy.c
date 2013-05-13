@@ -11,187 +11,18 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 
-#include "proxy.h"
+#include "config.h"
+#include "log.h"
 #include "ht.h"
-
-#define VERSION 23
-#define BUFSIZE 8096
-#define ERROR      42
-#define LOG        44
-#define FORBIDDEN 403
-#define NOTFOUND  404
-#define MAX_REQUESTS 10
-
-/* Predefine a few functions */
-void logger(int type, char *s1, char *s2, int socket_fd);
-void multipart_handler(int fd, char *uri, char *query);
-void test_handler(int fd, char *uri, char *query);
-
-/* Static table and typedefs for our handlers */
-typedef void (*handler_fp)(int fd, char *uri, char *query);
-struct {
-  char *uri;
-  handler_fp function;
-} handlers [] = {
-  {"/multipart.html", &multipart_handler},
-  {"/test4.html", &test_handler}, /* test handler */
-  {0,0} 
-};
-
-/* query_lookup table */
-struct ht_table *query_lookup;
-
-/* lookup table and helper function for extensions */
-struct {
-  char *ext;
-  char *filetype;
-} extensions [] = {
-  {"gif", "image/gif" },  
-  {"jpg", "image/jpg" }, 
-  {"jpeg","image/jpeg"},
-  {"png", "image/png" },  
-  {"ico", "image/ico" },  
-  {"zip", "image/zip" },  
-  {"gz",  "image/gz"  },  
-  {"tar", "image/tar" },  
-  {"htm", "text/html" },  
-  {"html","text/html" },  
-  {0,0} };
-char *get_extension_type(char *uri) {
-	/* work out the file type and check we support it */
-	int buflen=strlen(uri);
-	char *fstr = (char *)0;
-  int i = 0;
-	for(i=0;extensions[i].ext != 0;i++) {
-		int len = strlen(extensions[i].ext);
-		if( !strncmp(&uri[buflen-len], extensions[i].ext, len)) {
-			fstr = extensions[i].filetype;
-			break;
-		}
-	}
-	if(fstr == 0) logger(FORBIDDEN,"file extension type not supported",uri,0);
-
-  return fstr;
-}
-
-/* multipart handler. This takes in a dest and query query parameters for
-   proxying */
-void multipart_handler(int fd, char *uri, char *query) {
-	static char headers[BUFSIZE+1]; /* static so zero filled */
-  long len = 0;
-  int i = 0;
-  char *fstr = get_extension_type(uri);
-  char *q_dest = NULL;
-  char *q_query = NULL;
-
-  /* cut up the query string on & 
-     note: we should probably sanatize this */
-  char *str_ptr = strtok(query,"&");
-  while(str_ptr) {
-
-    char *key = str_ptr;
-    char *value = strchr(str_ptr, '=');
-    if(value) {
-      *value = 0;
-      value +=1;
-	    logger(LOG,"KEY",key,0);
-	    logger(LOG,"VALUE",value,0);
-
-      if(!strcmp("dest", key)) {
-        q_dest = value;
-      } else if (!strcmp("query", key)) {
-        q_query = value;
-      }
-    }
-
-    str_ptr = strtok(NULL, "&"); 
-  }
-
-  /* iterate through dest query parameter */
-  proxy_data proxy_requests[MAX_REQUESTS];
-  int request = 0;
-  if(q_dest && q_query) {
-    str_ptr = strtok(q_dest, ",");
-    while(str_ptr) {
-      /* execute on dest */
-      if(request < MAX_REQUESTS) {
-        /* setup proxy request */
-        proxy_init(&proxy_requests[request]);
-        proxy_requests[request].dest = str_ptr;
-        proxy_requests[request].query = q_query;
-
-	      logger(LOG,"Starting thread",str_ptr,request);
-        pthread_create(&proxy_requests[request].id,
-                        NULL,
-                        proxy_request,
-                        (void *)&proxy_requests[request]);
-        
-        request += 1; 
-        str_ptr = strtok(NULL, ","); 
-      }
-      else {
-			  logger(ERROR,"too many proxy requests","multiproxy",0);
-        break;
-      }
-    }
-  }
-
-  /* printout our html header */ 
-  static char output_value[BUFSIZE+1]; 
-  len += snprintf(&output_value[len], BUFSIZE-len+1, 
-                  "<html><body><ul>\n<h3>query: %s<h3>\n", q_query);
-    
-
-  /* wait for all requests to finish and print output */
-  for(i=0; i < request; i += 1) {
-    int error = pthread_join(proxy_requests[i].id, NULL);
-    /* print out requests */ 
-    if(!error) {
-      len += snprintf(&output_value[len], BUFSIZE-len+1, 
-                      "<li>%s</li>\n", proxy_requests[i].result);
-    }
-    else {
-      len += snprintf(&output_value[len], BUFSIZE-len+1, 
-                      "<li>ERROR: \"%s\"</li>\n", proxy_requests[i].error_str);
-    }
-  }
-  
-  /* print out the footer */
-  len += snprintf(&output_value[len], BUFSIZE-len+1, "</ul></body></html>\n");
+#include "proxy.h"
+#include "handlers.h"
+#include "extensions.h"
 
 
-  /* Header + a blank line */
-	static char html_header[BUFSIZE+1]; /* static so zero filled */
-  (void)snprintf(headers, BUFSIZE+1, "HTTP/1.1 200 OK\nServer: nweb/%d.0\nContent-Length: %ld\nConnection: close\nContent-Type: %s\n\n", VERSION, len, fstr);
-	logger(LOG,"header",headers,0);
-	(void)write(fd,headers,strlen(headers));
-
-  (void)write(fd,output_value,len);
-
-  /* clean up */
-  for(i=0; i < request; i += 1) {
-    proxy_cleanup(&proxy_requests[i]);
-  }
-  
-}
-
-/* test handler */
-void test_handler(int fd, char *uri, char *query) {
-  char *output_value = "Italian Village 5370 South 900 East  Salt Lake City, UT 84117  (801) 266-4182  - 3 stars - $10 per plate";
-  long len = strlen(output_value);
-  char *fstr = get_extension_type(uri);
-	static char headers[BUFSIZE+1]; /* static so zero filled */
-
-  /* Header + a blank line */
-  (void)sprintf(headers,"HTTP/1.1 200 OK\nServer: nweb/%d.0\nContent-Length: %ld\nConnection: close\nContent-Type: %s\n\n", VERSION, len, fstr);
-	logger(LOG,"header",headers,0);
-	(void)write(fd,headers,strlen(headers));
-  
-  (void)write(fd,output_value,len);
-}
+struct ht_table *handlers;
 
 /* send a file from the filesystem */
-void sendfile(int fd, char *buffer, int hit) {
+void sendfile_handler(int fd, char *buffer, int hit) {
   long i = 0;
   int j = 0;
   int ret = 0;
@@ -236,34 +67,6 @@ void sendfile(int fd, char *buffer, int hit) {
 	while (	(ret = read(file_fd, buffer, BUFSIZE)) > 0 ) {
 		(void)write(fd,buffer,ret);
 	}
-}
-
-/* log mechanism */
-void logger(int type, char *s1, char *s2, int socket_fd)
-{
-	int fd ;
-	char logbuffer[BUFSIZE*2];
-
-	switch (type) {
-	case ERROR: (void)sprintf(logbuffer,"ERROR: %s:%s Errno=%d exiting pid=%d",s1, s2, errno,getpid()); 
-		break;
-	case FORBIDDEN: 
-		(void)write(socket_fd, "HTTP/1.1 403 Forbidden\nContent-Length: 185\nConnection: close\nContent-Type: text/html\n\n<html><head>\n<title>403 Forbidden</title>\n</head><body>\n<h1>Forbidden</h1>\nThe requested URL, file type or operation is not allowed on this simple static file webserver.\n</body></html>\n",272);
-		(void)sprintf(logbuffer,"FORBIDDEN: %s:%s",s1, s2); 
-		break;
-	case NOTFOUND: 
-		(void)write(socket_fd, "HTTP/1.1 404 Not Found\nContent-Length: 136\nConnection: close\nContent-Type: text/html\n\n<html><head>\n<title>404 Not Found</title>\n</head><body>\n<h1>Not Found</h1>\nThe requested URL was not found on this server.\n</body></html>\n",224);
-		(void)sprintf(logbuffer,"NOT FOUND: %s:%s",s1, s2); 
-		break;
-	case LOG: (void)sprintf(logbuffer," INFO: %s:%s:%d",s1, s2,socket_fd); break;
-	}	
-	/* No checks here, nothing can be done with a failure anyway */
-	if((fd = open("nweb.log", O_CREAT| O_WRONLY | O_APPEND,0644)) >= 0) {
-		(void)write(fd,logbuffer,strlen(logbuffer)); 
-		(void)write(fd,"\n",1);      
-		(void)close(fd);
-	}
-	if(type == ERROR || type == NOTFOUND || type == FORBIDDEN) exit(3);
 }
 
 /* this is a child web server process, so we can exit on errors */
@@ -316,26 +119,18 @@ void web(int fd, int hit)
     }
   }
 
-  /* see if we can execute on any handlers */
-  int found_handler = 0;
-	for(i=0;handlers[i].uri != 0;i++) {
-		len = strlen(handlers[i].uri);
-		if( !strncmp(uri, handlers[i].uri, len)) {
-      (*handlers[i].function)(fd, uri, query_string);
-      found_handler = 1;
-			break;
-		}
-	}
- 
-  /* if we havent found a handler, see if we can send a file */ 
-  if(!found_handler) {
-    sendfile(fd, buffer, hit);
+  /* see if we can execute on any handlers, if not try to send a static file */
+  handler_fp handler = ht_get(handlers, uri);
+  if(handler) {
+    handler(fd, uri, query_string);
+  }
+  else {
+    sendfile_handler(fd, buffer, hit);
   }
 
 	sleep(1);	/* allow socket to drain before signalling the socket is closed */
 	close(fd);
 	exit(1);
-
 }
 
 int main(int argc, char **argv)
@@ -345,12 +140,15 @@ int main(int argc, char **argv)
 	static struct sockaddr_in cli_addr; /* static = initialised to zeros */
 	static struct sockaddr_in serv_addr; /* static = initialised to zeros */
 
-  struct ht_table *query_lookup = ht_init(20);
-  ht_set(query_lookup, "test1", "test1_value");
-  ht_set(query_lookup, "test2", "test2_value");
-  ht_set(query_lookup, "test3", "test3_value");
 
-  printf("%s: %s", "test1", (char *)ht_get(query_lookup, "test1"));
+  // Setup our handlers
+  handlers_init();
+  handlers = ht_init(10);
+  ht_set(handlers, "/multiproxy.html", (void *)multipart_handler);
+  ht_set(handlers, "/a.json", (void *)a_handler);
+  ht_set(handlers, "/b.json", (void *)b_handler);
+  ht_set(handlers, "/c.json", (void *)c_handler);
+
 
 	if( argc < 3  || argc > 3 || !strcmp(argv[1], "-?") ) {
 		(void)printf("hint: multiproxy Port-Number Top-Directory\t\tversion %d\n\n"
@@ -358,10 +156,7 @@ int main(int argc, char **argv)
 	"\tmultiproxy only servers out file/web pages with extensions named below\n"
 	"\t and only from the named directory or its sub-directories.\n"
 	"\tThere is no fancy features = safe and secure.\n\n"
-	"\tExample: multiproxy 8080 /home/multiproxydir &\n\n"
-	"\tOnly Supports:", VERSION);
-		for(i=0;extensions[i].ext != 0;i++)
-			(void)printf(" %s",extensions[i].ext);
+	"\tExample: multiproxy 8080 /home/multiproxydir &\n\n", VERSION);
 
 		(void)printf("\n\tNot Supported: URLs including \"..\", Java, Javascript, CGI\n"
 	"\tNot Supported: directories / /etc /bin /lib /tmp /usr /dev /sbin \n"
@@ -383,10 +178,10 @@ int main(int argc, char **argv)
   curl_global_init(CURL_GLOBAL_ALL);
 
 	/* Become deamon + unstopable and no zombies children (= no wait()) */
-	if(fork() != 0)
-		return 0; /* parent returns OK to shell */
+	//if(fork() != 0)
+	//	return 0; /* parent returns OK to shell */
 
-	(void)signal(SIGCLD, SIG_IGN); /* ignore child death */
+	//(void)signal(SIGCLD, SIG_IGN); /* ignore child death */
 	(void)signal(SIGHUP, SIG_IGN); /* ignore terminal hangups */
 	for(i=0;i<32;i++)
 		(void)close(i);		/* close open files */

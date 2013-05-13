@@ -4,11 +4,10 @@ struct {
   char *dest;
   char *url;
 } dest_lookup [] = {
-  { "A", "http://localhost:8080/test1.html" },
-  { "B", "http://localhost:8080/test2.html" },
-  { "C", "http://localhost:8080/test3.html" },
+  { "A", "http://localhost:8080/a.json" },
+  { "B", "http://localhost:8080/b.json" },
+  { "C", "http://localhost:8080/c.json" },
   { 0, 0 } };
-
 
 
 void proxy_init(proxy_data *data) {

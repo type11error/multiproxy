@@ -1,3 +1,6 @@
+#ifndef MULTIPROXY_PROXY
+#define MULTIPROXY_PROXY
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,3 +28,5 @@ void *proxy_request(void *);
 
 /* clean up proxy data */
 void proxy_cleanup(proxy_data *data);
+
+#endif /* MULTIPROXY_PROXY */
